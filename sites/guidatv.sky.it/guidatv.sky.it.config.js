@@ -15,8 +15,11 @@ module.exports = {
     const items = data.events
     if (!items.length) return programs
     items.forEach(item => {
+      const title = parseTitle(item)
+
       programs.push({
-        title: item.eventTitle,
+        title: title,
+        sub_title: title !== item.eventTitle ? item.eventTitle : null,
         description: item.eventSynopsis,
         category: parseCategory(item),
         season: parseSeason(item),
@@ -65,6 +68,19 @@ function parseCategory(item) {
     category += `/${subcategory}`
   }
   return category
+}
+
+function parseTitle(item) {
+  let title = item.epgEventTitle || item.eventTitle || null
+  // find season episode in title
+  const season = title.match(/S(\d+)/)
+  const episode = title.match(/Ep(\d+)/)
+  if (season && episode) {
+    title = title.replace(season[0], '').trim()
+    title = title.replace(episode[0], '').trim()
+    title = title.replace(/^[:\s-]+/gm, '')
+  }
+  return title
 }
 
 function parseStart(item) {
