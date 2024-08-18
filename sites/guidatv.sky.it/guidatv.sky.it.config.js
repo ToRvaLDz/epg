@@ -96,7 +96,7 @@ function parseURL(item) {
 }
 
 function parseImage(item) {
-  const cover = item.content.imagesMap ? item.content.imagesMap.find(i => i.key === 'cover') : null
+  const cover = item.content.imagesMap ? item.content.imagesMap.find(i => i.key === 'background') : null
 
   return cover && cover.img && cover.img.url ? `https://guidatv.sky.it${cover.img.url}` : null
 }

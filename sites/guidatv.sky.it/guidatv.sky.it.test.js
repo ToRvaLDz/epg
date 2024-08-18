@@ -36,7 +36,7 @@ it('can parse response', () => {
         'S2 Ep3 Langhe - Paola Marella accompagna l\'attore Sergio Assisi alla ricerca di una dimora da sogno per passare una vacanza enogastronomica con i suoi amici \'napoletani doc\' nelle Langhe.',
       season: 2,
       episode: 3,
-      image: 'https://guidatv.sky.it/uuid/58043e8c-8bba-415c-a64b-7433aef56a0c/cover?md5ChecksumParam=a8ae66249f32698c3a0d4ff6917977b0',
+      image: 'https://guidatv.sky.it/uuid/58043e8c-8bba-415c-a64b-7433aef56a0c/background?md5ChecksumParam=481c7caa39c8a9f7d121e427abda6ffa',
       category: 'Mondo e Tendenze/Lifestyle',
       url: 'https://guidatv.sky.it/programmi-tv/lifestyle/un-sogno-in-affitto/stagione-2/episodio-3/58043e8c-8bba-415c-a64b-7433aef56a0c'
     }
