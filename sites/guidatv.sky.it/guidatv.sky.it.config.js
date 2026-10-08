@@ -17,7 +17,8 @@ module.exports = {
     if (!items.length) return programs
     items.forEach(item => {
       programs.push({
-        title: item.eventTitle,
+        title: parseTitle(item),
+        sub_title: parseSubTitle(item),
         description: item.eventSynopsis,
         category: parseCategory(item),
         season: parseSeason(item),
@@ -51,6 +52,32 @@ module.exports = {
   }
 }
 
+// Programmi a episodi: eventTitle è il nome dell'episodio ("Ep. 2", "Adorazione
+// perpetua"), il nome della serie sta solo in epgEventTitle ("S5 Ep2 - Downton
+// Abbey"). Titolo = serie, episodio nel sottotitolo (#340).
+const EPISODE_TITLE = /^S\d+\s*Ep\d+\s*-\s*(.+)$/
+const BARE_EPISODE = /^Ep(isodio)?\.?\s*\d+$/i
+
+function parseSeriesName(item) {
+  const match = (item.epgEventTitle || '').trim().match(EPISODE_TITLE)
+  return match ? match[1].trim() : null
+}
+
+function parseTitle(item) {
+  const series = parseSeriesName(item)
+  if (!series) return item.eventTitle
+  // Nome serie troncato da Sky ("...") : meglio il titolo evento, se dice qualcosa
+  if (series.endsWith('...') && !BARE_EPISODE.test(item.eventTitle || '')) return item.eventTitle
+  return series
+}
+
+function parseSubTitle(item) {
+  if (!parseSeriesName(item)) return null
+  const title = parseTitle(item)
+  const candidates = [item.eventTitle, item.content.contentTitle]
+  return candidates.find(c => c && c.trim() && c !== title) || null
+}
+
 function parseCategory(item) {
   let category = item.content.genre.name || null
   const subcategory = item.content.subgenre.name || null
@@ -73,9 +100,14 @@ function parseURL(item) {
 }
 
 function parseImage(item) {
-  const cover = item.content.imagesMap ? item.content.imagesMap.find(i => i.key === 'cover') : null
+  const images = item.content.imagesMap || []
+  // landscape 16:9 first (background = HERO_CLEAN_WIDE), portrait cover as fallback
+  for (const key of ['background', 'scene', 'cover']) {
+    const image = images.find(i => i.key === key)
+    if (image && image.img && image.img.url) return `https://guidatv.sky.it${image.img.url}`
+  }
 
-  return cover && cover.img && cover.img.url ? `https://guidatv.sky.it${cover.img.url}` : null
+  return null
 }
 
 function parseSeason(item) {
