@@ -34,6 +34,11 @@ jobs:
       - name: Rebase su upstream master
         id: rebase
         run: |
+          # upstream ha blob CRLF + `eol=crlf` in .gitattributes: dopo il checkout
+          # git vede tutto "modificato" e il rebase rifiuta di partire. -text =
+          # byte dei blob così come sono, albero pulito.
+          echo '* -text' >> .git/info/attributes
+          git reset -q --hard
           git config user.name "ziptv2-bot"
           git config user.email "ziptv2-bot@users.noreply.github.com"
           git remote add upstream https://github.com/iptv-org/epg.git
