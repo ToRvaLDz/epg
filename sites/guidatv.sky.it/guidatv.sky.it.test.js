@@ -38,7 +38,7 @@ it('can parse response', () => {
       season: 6,
       episode: 26,
       image:
-        'https://guidatv.sky.it/uuid/77c630aa-4744-44cb-a88e-3e871c6b73d9/cover?md5ChecksumParam=61135b999a63e3d3f4a933b9edeb0c1b',
+        'https://guidatv.sky.it/uuid/77c630aa-4744-44cb-a88e-3e871c6b73d9/background?md5ChecksumParam=88d3f48ce855316f4be25ab9bb846d32',
       category: 'Intrattenimento/Fiction',
       url: 'https://guidatv.sky.it/serie-tv/distretto-di-polizia/stagione-6/episodio-26/77c630aa-4744-44cb-a88e-3e871c6b73d9'
     }
@@ -69,5 +69,58 @@ it('can parse channel list', async () => {
     name: 'Sky Sport24',
     lang: 'it',
     xmltv_id: 'SkySport24.it',
+  })
+})
+
+// ziptv2: programmi a episodi, titolo = nome serie (da epgEventTitle), episodio nel sottotitolo
+describe('episode titles', () => {
+  const event = ({ eventTitle, epgEventTitle, contentTitle = eventTitle }) => ({
+    eventTitle,
+    epgEventTitle,
+    eventSynopsis: 'sinossi',
+    starttime: '2026-10-02T08:30:00Z',
+    endtime: '2026-10-02T09:25:00Z',
+    content: {
+      contentTitle,
+      genre: { name: 'Intrattenimento' },
+      subgenre: { name: 'Fiction' },
+      imagesMap: []
+    }
+  })
+  const parse = (...events) => parser({ content: JSON.stringify({ events }) })
+
+  it('uses the series name when the episode has no name', () => {
+    const [p] = parse(event({ eventTitle: 'Ep. 2', epgEventTitle: 'S5 Ep2 - Downton Abbey' }))
+    expect(p.title).toBe('Downton Abbey')
+    expect(p.sub_title).toBe('Ep. 2')
+  })
+
+  it('moves the episode name to the subtitle', () => {
+    const [p] = parse(event({ eventTitle: 'Adorazione perpetua', epgEventTitle: 'S5 Ep5 - Outlander' }))
+    expect(p.title).toBe('Outlander')
+    expect(p.sub_title).toBe('Adorazione perpetua')
+  })
+
+  it('falls back to the content title when the event title is the series', () => {
+    const [p] = parse(
+      event({ eventTitle: 'Friends', epgEventTitle: 'S6 Ep21 - Friends', contentTitle: 'Incontro con papà' })
+    )
+    expect(p.title).toBe('Friends')
+    expect(p.sub_title).toBe('Incontro con papà')
+  })
+
+  it('keeps a meaningful event title when the series name is truncated', () => {
+    const [p] = parse(event({ eventTitle: 'Ep. 7', epgEventTitle: "S1 Ep7 - Hanno ucciso l'uomo ragno - La..." }))
+    expect(p.title).toBe("Hanno ucciso l'uomo ragno - La...")
+    const [q] = parse(event({ eventTitle: 'Il Social', epgEventTitle: 'S1 Ep4 - Super Shark - I signori de...' }))
+    expect(q.title).toBe('Il Social')
+  })
+
+  it('leaves non-episodic programmes unchanged', () => {
+    const [p] = parse(event({ eventTitle: 'Road House', epgEventTitle: 'Road House' }))
+    expect(p.title).toBe('Road House')
+    expect(p.sub_title).toBe(null)
+    const [q] = parse(event({ eventTitle: 'News Line', epgEventTitle: undefined }))
+    expect(q.title).toBe('News Line')
   })
 })
