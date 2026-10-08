@@ -1,5 +1,5 @@
 # Immagine ziptv2: ogni notte rebase del branch `ziptv2` su iptv-org/epg master,
-# test dei siti che patchiamo, build e push su ghcr.io/torvaldz/epg:ziptv2.
+# test dei siti che patchiamo, build e push su ghcr.io/torvaldz/ziptv2-epg:ziptv2.
 # Il rebase resta locale al job (niente push del branch): se va in conflitto o
 # un test fallisce il job fallisce e l'ultima immagine buona resta quella.
 name: ziptv2 image
@@ -20,7 +20,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/torvaldz/epg
+  IMAGE: ghcr.io/torvaldz/ziptv2-epg
 
 jobs:
   build:
