@@ -1,0 +1,83 @@
+# Immagine ziptv2: ogni notte rebase del branch `ziptv2` su iptv-org/epg master,
+# test dei siti che patchiamo, build e push su ghcr.io/torvaldz/epg:ziptv2.
+# Il rebase resta locale al job (niente push del branch): se va in conflitto o
+# un test fallisce il job fallisce e l'ultima immagine buona resta quella.
+name: ziptv2 image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ziptv2]
+  schedule:
+    - cron: '0 1 * * *' # prima del grab delle 03:00 UTC su Margie
+
+concurrency:
+  group: ziptv2-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/torvaldz/epg
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ziptv2
+          fetch-depth: 0
+
+      - name: Rebase su upstream master
+        id: rebase
+        run: |
+          git config user.name "ziptv2-bot"
+          git config user.email "ziptv2-bot@users.noreply.github.com"
+          git remote add upstream https://github.com/iptv-org/epg.git
+          git fetch --no-tags upstream master
+          ours=$(git rev-parse --short HEAD)
+          git rebase upstream/master || { git rebase --abort; echo "::error::rebase su upstream in conflitto: risolvere a mano sul branch ziptv2"; exit 1; }
+          echo "upstream=$(git rev-parse --short upstream/master)" >> "$GITHUB_OUTPUT"
+          echo "ours=$ours" >> "$GITHUB_OUTPUT"
+          echo "sites=$(git diff --name-only upstream/master HEAD -- sites | cut -d/ -f2 | sort -u | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Test dei siti patchati
+        if: steps.rebase.outputs.sites != ''
+        env:
+          TZ: Pacific/Nauru # come `npm test` upstream
+        run: |
+          npm ci --no-audit --no-fund
+          for site in ${{ steps.rebase.outputs.sites }}; do
+            npx jest --runInBand "sites/$site"
+          done
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .ziptv2/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:ziptv2
+            ${{ env.IMAGE }}:ziptv2-${{ steps.rebase.outputs.upstream }}-${{ steps.rebase.outputs.ours }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.rebase.outputs.upstream }}+${{ steps.rebase.outputs.ours }}
+            org.opencontainers.image.description=iptv-org/epg + patch ziptv2
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
