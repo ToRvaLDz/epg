@@ -4,7 +4,7 @@ Fork di [iptv-org/epg](https://github.com/iptv-org/epg) usato dal backbone EPG d
 ZipTv2 (`ToRvaLDz/ziptv2`, `infra/epg/`). Il branch è **upstream master + i nostri
 commit**; tutto il resto viene da upstream.
 
-- **Immagine**: `ghcr.io/torvaldz/epg:ziptv2` (+ tag `ziptv2-<upstream>-<nostro>`),
+- **Immagine**: `ghcr.io/torvaldz/ziptv2-epg:ziptv2` (+ tag `ziptv2-<upstream>-<nostro>`),
   costruita da `.ziptv2/Dockerfile` dal workflow `ziptv2 image`: ogni notte alle
   01:00 UTC, a ogni push su `ziptv2`, o a mano (`workflow_dispatch`).
 - **Rebase**: il workflow ribasa il branch su upstream solo nel job (non lo pusha).
