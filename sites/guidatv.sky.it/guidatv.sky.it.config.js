@@ -132,7 +132,7 @@ function parseSeason(item) {
   if (!episode) return null
   for (const [read, regex] of SEASON_SOURCES) {
     const match = (read(item) || '').match(regex)
-    if (!match || Number(match[2]) !== episode) continue
+    if (!match || Number(match[2]) !== Number(episode)) continue
     const season = Number(match[1])
     if (season >= 1 && season <= 99) return season
   }
