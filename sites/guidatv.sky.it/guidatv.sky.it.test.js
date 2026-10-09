@@ -124,3 +124,91 @@ describe('episode titles', () => {
     expect(q.title).toBe('News Line')
   })
 })
+
+// ziptv2: stagione ricavata da titolo/sinossi/url quando seasonNumber è null (#482)
+describe('season and episode', () => {
+  const event = ({ seasonNumber = null, episodeNumber = null, title = 'Programma', url, synopsis = 'sinossi' }) => ({
+    eventTitle: title,
+    epgEventTitle: title,
+    eventSynopsis: synopsis,
+    starttime: '2026-10-02T08:30:00Z',
+    endtime: '2026-10-02T09:25:00Z',
+    content: {
+      contentTitle: title,
+      seasonNumber,
+      episodeNumber,
+      url,
+      genre: { name: 'Intrattenimento' },
+      subgenre: { name: 'Fiction' },
+      imagesMap: []
+    }
+  })
+  const parse = e => parser({ content: JSON.stringify({ events: [e] }) })[0]
+
+  it('reads the season from title and synopsis when seasonNumber is null', () => {
+    const p = parse(
+      event({
+        episodeNumber: 1,
+        title: 'Deadliest Catch - Stag. 15 Ep. 1 - La battaglia dei re',
+        url: '/programmi-tv/pesca/deadliest-catch-stag-15-ep-1-la-battaglia-dei-re/uuid',
+        synopsis: 'S15 Ep1 La battaglia dei re - sinossi'
+      })
+    )
+    expect(p.season).toBe(15)
+    expect(p.episode).toBe(1)
+    expect(p.episodeNumbers).toBeUndefined()
+  })
+
+  it('reads a two-digit episode from the title', () => {
+    const p = parse(
+      event({ episodeNumber: 10, title: "Come e' fatto - Stag. 17 Ep. 10", synopsis: 'S17 Ep10 - Vi siete...' })
+    )
+    expect(p.season).toBe(17)
+    expect(p.episodeNumbers).toBeUndefined()
+  })
+
+  it('reads the season from the synopsis only', () => {
+    const p = parse(event({ episodeNumber: 2, synopsis: 'S4 Ep2 Oro nazista - sinossi' }))
+    expect(p.season).toBe(4)
+    expect(p.episodeNumbers).toBeUndefined()
+  })
+
+  it('reads the season from the url only', () => {
+    const p = parse(event({ episodeNumber: 2, url: '/serie-tv/x/stagione-6/episodio-2/uuid' }))
+    expect(p.season).toBe(6)
+    expect(p.episodeNumbers).toBeUndefined()
+  })
+
+  it('ignores a derived season whose episode does not match', () => {
+    const p = parse(event({ episodeNumber: 6, title: 'Serie - Stag. 3 Ep. 5' }))
+    expect(p.season).toBe(null)
+    expect(p.episodeNumbers).toEqual([
+      { system: 'xmltv_ns', value: '.5.0/1' },
+      { system: 'onscreen', value: 'E06' }
+    ])
+  })
+
+  it('does not invent season 1 when the season is unknown', () => {
+    const p = parse(event({ episodeNumber: 3 }))
+    expect(p.season).toBe(null)
+    expect(p.episode).toBe(3)
+    expect(p.episodeNumbers).toEqual([
+      { system: 'xmltv_ns', value: '.2.0/1' },
+      { system: 'onscreen', value: 'E03' }
+    ])
+  })
+
+  it('keeps a structured season untouched', () => {
+    const p = parse(event({ seasonNumber: 6, episodeNumber: 26 }))
+    expect(p.season).toBe(6)
+    expect(p.episode).toBe(26)
+    expect(p.episodeNumbers).toBeUndefined()
+  })
+
+  it('leaves programmes without episode unchanged', () => {
+    const p = parse(event({}))
+    expect(p.season).toBe(null)
+    expect(p.episode).toBe(null)
+    expect(p.episodeNumbers).toBeUndefined()
+  })
+})
