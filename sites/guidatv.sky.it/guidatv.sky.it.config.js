@@ -16,13 +16,16 @@ module.exports = {
     const items = data.events
     if (!items.length) return programs
     items.forEach(item => {
+      const season = parseSeason(item)
+      const episode = parseEpisode(item)
       programs.push({
         title: parseTitle(item),
         sub_title: parseSubTitle(item),
         description: item.eventSynopsis,
         category: parseCategory(item),
-        season: parseSeason(item),
-        episode: parseEpisode(item),
+        season,
+        episode,
+        episodeNumbers: parseEpisodeNumbers(season, episode),
         start: parseStart(item),
         stop: parseStop(item),
         url: parseURL(item),
@@ -110,10 +113,40 @@ function parseImage(item) {
   return null
 }
 
+// Sky spesso valorizza episodeNumber ma lascia seasonNumber null: la stagione
+// compare solo in url ("stagione-6/episodio-2"), titolo ("Stag. 15 Ep. 1") o
+// sinossi ("S15 Ep1 ..."). Si accetta solo se l'episodio coincide (#482).
+const SEASON_SOURCES = [
+  [item => item.content.url, /\/stagione-(\d+)\/episodio-(\d+)(?:\/|$)/],
+  [item => item.eventTitle, /\bStag\.\s*(\d+)\s*Ep\.\s*(\d+)\b/i],
+  [item => item.epgEventTitle, /\bStag\.\s*(\d+)\s*Ep\.\s*(\d+)\b/i],
+  [item => item.eventSynopsis, /^\s*S(\d+)\s*Ep(\d+)\b/]
+]
+
 function parseSeason(item) {
-  if (!item.content.seasonNumber) return null
-  if (String(item.content.seasonNumber).length > 2) return null
-  return item.content.seasonNumber
+  const seasonNumber = item.content.seasonNumber
+  if (seasonNumber && String(seasonNumber).length <= 2) return seasonNumber
+  if (seasonNumber) return null
+
+  const episode = parseEpisode(item)
+  if (!episode) return null
+  for (const [read, regex] of SEASON_SOURCES) {
+    const match = (read(item) || '').match(regex)
+    if (!match || Number(match[2]) !== episode) continue
+    const season = Number(match[1])
+    if (season >= 1 && season <= 99) return season
+  }
+
+  return null
+}
+
+// Stagione ignota: episodeNumbers espliciti, altrimenti epg-grabber assume S01
+function parseEpisodeNumbers(season, episode) {
+  if (season || !episode) return undefined
+  return [
+    { system: 'xmltv_ns', value: `.${episode - 1}.0/1` },
+    { system: 'onscreen', value: `E${String(episode).padStart(2, '0')}` }
+  ]
 }
 
 function parseEpisode(item) {
