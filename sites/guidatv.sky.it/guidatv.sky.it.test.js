@@ -74,7 +74,7 @@ it('can parse channel list', async () => {
 
 // ziptv2: programmi a episodi, titolo = nome serie (da epgEventTitle), episodio nel sottotitolo
 describe('episode titles', () => {
-  const event = ({ eventTitle, epgEventTitle, contentTitle = eventTitle }) => ({
+  const event = ({ eventTitle, epgEventTitle, contentTitle = eventTitle, url }) => ({
     eventTitle,
     epgEventTitle,
     eventSynopsis: 'sinossi',
@@ -82,6 +82,7 @@ describe('episode titles', () => {
     endtime: '2026-10-02T09:25:00Z',
     content: {
       contentTitle,
+      url,
       genre: { name: 'Intrattenimento' },
       subgenre: { name: 'Fiction' },
       imagesMap: []
@@ -114,6 +115,83 @@ describe('episode titles', () => {
     expect(p.title).toBe("Hanno ucciso l'uomo ragno - La...")
     const [q] = parse(event({ eventTitle: 'Il Social', epgEventTitle: 'S1 Ep4 - Super Shark - I signori de...' }))
     expect(q.title).toBe('Il Social')
+  })
+
+  // ziptv2 #539: Sky dà solo «Ep. 2» in tutti i titoli, il nome sta nello slug dell'URL
+  it('takes the programme name from the url slug when every title is a bare episode', () => {
+    const [p] = parse(
+      event({
+        eventTitle: 'Ep. 2',
+        epgEventTitle: 'Ep. 2',
+        url: '/sport/fair-play-di-rino-tommasi/ep-2/4dae730c-a845-4cd6-83e7-eb5f48a20012'
+      })
+    )
+    expect(p.title).toBe('Fair Play di Rino Tommasi')
+    expect(p.sub_title).toBe('Ep. 2')
+  })
+
+  it('skips an episode segment without hyphen', () => {
+    const [p] = parse(
+      event({
+        eventTitle: 'Ep.2',
+        epgEventTitle: 'Ep.2',
+        url: '/sport/toro-1976-lassu-qualcuno-ti-ama/ep2/699034d3-2758-4d96-a9b4-c5ed8e6ca983'
+      })
+    )
+    expect(p.title).toBe('Toro 1976 Lassu Qualcuno Ti Ama')
+    expect(p.sub_title).toBe('Ep.2')
+  })
+
+  it('cuts season and episode markers embedded in the slug', () => {
+    const [p] = parse(
+      event({
+        eventTitle: 'Ep. 5',
+        epgEventTitle: 'Ep. 5',
+        url: '/programmi-tv/caccia/a-caccia-in-nord-europa-1-stag-1-ep-5/ca07043f-7733-482c-baec-d72a1134ca38'
+      })
+    )
+    expect(p.title).toBe('A Caccia in Nord Europa')
+    const [q] = parse(
+      event({
+        eventTitle: 'Ep.5',
+        epgEventTitle: 'Ep.5',
+        url: '/sport/racing-on-the-edge/vela-racing-on-the-edge-2026-ep5-09-10-2026/6a34babb-7112-4f46-b346-8aa1a15b54de'
+      })
+    )
+    expect(q.title).toBe('Vela Racing On The Edge 2026')
+  })
+
+  it('skips season and episode segments of the url slug', () => {
+    const [p] = parse(
+      event({
+        eventTitle: 'Episodio 3',
+        epgEventTitle: 'Episodio 3',
+        url: '/programmi-tv/gioco/ben-10-ultimate-challenge/stagione-1/episodio-3/f4e74324-0abe-402a-9764-d19ebc357456'
+      })
+    )
+    expect(p.title).toBe('Ben 10 Ultimate Challenge')
+    expect(p.sub_title).toBe('Episodio 3')
+  })
+
+  it('keeps the bare episode title when the url has no programme slug', () => {
+    const [p] = parse(event({ eventTitle: 'Ep. 2', epgEventTitle: 'Ep. 2', url: '/uuid/4dae730c' }))
+    expect(p.title).toBe('Ep. 2')
+    const [q] = parse(event({ eventTitle: 'Ep. 2', epgEventTitle: 'Ep. 2' }))
+    expect(q.title).toBe('Ep. 2')
+    expect(q.sub_title).toBe(null)
+  })
+
+  // ziptv2 #539: «X - Ep. -1 - X» è un titolo evento sporco, contentTitle è pulito
+  it('uses the content title when the event title carries a placeholder episode', () => {
+    const [p] = parse(
+      event({
+        eventTitle: 'Nadal - Coria. Finale - Ep. -1 - Nadal - Coria. Finale',
+        epgEventTitle: 'Nadal - Coria. Finale - Ep. -1 - Nadal - Coria. Finale',
+        contentTitle: 'Nadal - Coria. Finale'
+      })
+    )
+    expect(p.title).toBe('Nadal - Coria. Finale')
+    expect(p.sub_title).toBe(null)
   })
 
   it('leaves non-episodic programmes unchanged', () => {
