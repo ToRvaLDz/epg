@@ -68,17 +68,64 @@ function parseSeriesName(item) {
 
 function parseTitle(item) {
   const series = parseSeriesName(item)
-  if (!series) return item.eventTitle
+  if (!series) return parseNonSeriesTitle(item)
   // Nome serie troncato da Sky ("...") : meglio il titolo evento, se dice qualcosa
   if (series.endsWith('...') && !BARE_EPISODE.test(item.eventTitle || '')) return item.eventTitle
   return series
 }
 
 function parseSubTitle(item) {
-  if (!parseSeriesName(item)) return null
+  if (!parseSeriesName(item)) return parseSlugTitle(item) ? item.eventTitle : null
   const title = parseTitle(item)
   const candidates = [item.eventTitle, item.content.contentTitle]
   return candidates.find(c => c && c.trim() && c !== title) || null
+}
+
+// ziptv2 #539: titolo evento sporco «X - Ep. -1 - X»; contentTitle è pulito
+const PLACEHOLDER_EPISODE = /\s-\sEp\.\s-\d+\s-\s/
+
+function parseNonSeriesTitle(item) {
+  const slugTitle = parseSlugTitle(item)
+  if (slugTitle) return slugTitle
+  const contentTitle = (item.content.contentTitle || '').trim()
+  if (PLACEHOLDER_EPISODE.test(item.eventTitle || '') && contentTitle) return contentTitle
+  return item.eventTitle
+}
+
+// ziptv2 #539: a volte Sky dà solo «Ep. 2» in tutti i titoli e il nome del
+// programma sta solo nello slug dell'URL ("/sport/fair-play-di-rino-tommasi/ep-2/<uuid>").
+// Null se il titolo evento non è un episodio nudo o lo slug manca.
+const URL_EPISODE_SEGMENT = /^(ep|episodio|stagione)-?\d+$/
+const LOWERCASE_WORDS = new Set([
+  'a', 'ad', 'al', 'con', 'da', 'dal', 'dei', 'del', 'della', 'di', 'e', 'ed',
+  'gli', 'i', 'il', 'in', 'la', 'le', 'lo', 'nel', 'per', 'su', 'tra'
+])
+
+// Slug con l'episodio dentro ("a-caccia-in-nord-europa-1-stag-1-ep-5",
+// "vela-...-2026-ep5-09-10-2026"): si tiene solo la parte prima del marcatore,
+// senza il numero di stagione che precede «stag».
+const SLUG_EPISODE_MARKER = /^(stag|stagione|ep\d*|episodio\d*)$/
+
+function cutEpisodeMarker(words) {
+  const at = words.findIndex(w => SLUG_EPISODE_MARKER.test(w))
+  if (at < 0) return words
+  const kept = words.slice(0, at)
+  const season = words[at].startsWith('stag')
+  if (season && kept.length > 1 && /^\d+$/.test(kept[kept.length - 1])) kept.pop()
+  return kept
+}
+
+function parseSlugTitle(item) {
+  if (!BARE_EPISODE.test((item.eventTitle || '').trim())) return null
+  const segments = (item.content.url || '').split('/').filter(Boolean)
+  // [sezione, ..., slug, (stagione-N, episodio-N | ep-N), uuid]
+  const named = segments.slice(0, -1).filter(s => !URL_EPISODE_SEGMENT.test(s))
+  if (named.length < 2) return null
+  const words = cutEpisodeMarker(named[named.length - 1].split('-').filter(Boolean))
+  if (!words.length) return null
+  return words
+    .map((w, i) => (i > 0 && LOWERCASE_WORDS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
 }
 
 function parseCategory(item) {
