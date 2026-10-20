@@ -6,6 +6,11 @@ name: ziptv2 image
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: Ricostruisci anche se l'immagine per questa revision esiste già
+        type: boolean
+        default: false
   push:
     branches: [ziptv2]
   schedule:
@@ -49,13 +54,27 @@ jobs:
           echo "ours=$ours" >> "$GITHUB_OUTPUT"
           echo "sites=$(git diff --name-only upstream/master HEAD -- sites | cut -d/ -f2 | sort -u | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
+      # Se upstream e il nostro branch non sono cambiati l'immagine di questa revision è già
+      # su ghcr: ripubblicare :ziptv2 con lo stesso codice cambia solo l'image ID e fa
+      # ricreare inutilmente il container su Margie all'update notturno.
+      - name: Immagine già pubblicata?
+        id: exists
+        if: ${{ !inputs.force }}
+        run: |
+          tag="${{ env.IMAGE }}:ziptv2-${{ steps.rebase.outputs.upstream }}-${{ steps.rebase.outputs.ours }}"
+          if docker buildx imagetools inspect "$tag" > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$tag già pubblicata, niente build"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.exists.outputs.skip != 'true'
         with:
           node-version: 22
           cache: npm
 
       - name: Test dei siti patchati
-        if: steps.rebase.outputs.sites != ''
+        if: steps.exists.outputs.skip != 'true' && steps.rebase.outputs.sites != ''
         env:
           TZ: Pacific/Nauru # come `npm test` upstream
         run: |
@@ -65,14 +84,17 @@ jobs:
           done
 
       - uses: docker/setup-buildx-action@v3
+        if: steps.exists.outputs.skip != 'true'
 
       - uses: docker/login-action@v3
+        if: steps.exists.outputs.skip != 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6
+        if: steps.exists.outputs.skip != 'true'
         with:
           context: .
           file: .ziptv2/Dockerfile
