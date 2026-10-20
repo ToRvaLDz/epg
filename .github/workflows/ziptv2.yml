@@ -57,14 +57,19 @@ jobs:
       # Se upstream e il nostro branch non sono cambiati l'immagine di questa revision è già
       # su ghcr: ripubblicare :ziptv2 con lo stesso codice cambia solo l'image ID e fa
       # ricreare inutilmente il container su Margie all'update notturno.
+      # Si salta solo se :ziptv2 punta proprio a quella revision: dopo un reset del branch
+      # a un commit già buildato il tag esiste ma :ziptv2 è su un'altra immagine.
       - name: Immagine già pubblicata?
         id: exists
         if: ${{ !inputs.force }}
         run: |
           tag="${{ env.IMAGE }}:ziptv2-${{ steps.rebase.outputs.upstream }}-${{ steps.rebase.outputs.ours }}"
-          if docker buildx imagetools inspect "$tag" > /dev/null 2>&1; then
+          digest() { docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}' 2>/dev/null || true; }
+          rev=$(digest "$tag")
+          latest=$(digest "${{ env.IMAGE }}:ziptv2")
+          if [ -n "$rev" ] && [ "$rev" = "$latest" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::$tag già pubblicata, niente build"
+            echo "::notice::$tag già pubblicata e :ziptv2 punta lì, niente build"
           fi
 
       - uses: actions/setup-node@v4
