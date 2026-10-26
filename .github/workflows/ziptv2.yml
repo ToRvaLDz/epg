@@ -1,29 +1,23 @@
-# Immagine ziptv2: candidato testato + promozione manuale (ziptv2#590).
+# Immagine ziptv2: candidato testato + promozione automatica (ziptv2#590, ziptv2#660).
 #
 # Ogni notte (e a ogni push su `ziptv2`):
-#   1. promozione: se ziptv2 ha messo in produzione (merge della PR) il candidato
-#      costruito dal `ziptv2` attuale, `ziptv2` avanza a quel candidato e
-#      l'alias `:ziptv2` passa all'immagine promossa;
+#   1. recupero: se `:ziptv2` è un candidato costruito dal `ziptv2` attuale ma il
+#      branch non è avanzato (push fallito in un run precedente), `ziptv2` avanza ora;
 #   2. riferimento upstream: l'ultimo commit di iptv-org/epg master più vecchio di
 #      COOLDOWN_DAYS giorni (upstream non ha tag: l'attesa lascia arrivare i fix urgenti);
 #   3. rebase di `ziptv2` su quel commit -> branch `ziptv2-next` (conflitto = issue nel fork);
 #   4. test: jest dei siti patchati + grab di prova di 1 giorno sui canali curati
-#      di ziptv2, con l'immagine di produzione e con la candidata sulla stessa
-#      macchina; bocciato se cala la copertura (epg_coverage.py);
-#   5. push del solo tag di revision `:ziptv2-<upstream>-<nostro>` e PR in
-#      ToRvaLDz/ziptv2 che lo fissa in infra/epg/docker-compose.yml.
-# Il redeploy su Margie dopo il merge resta manuale. Una PR chiusa senza merge
-# non viene riaperta per la stessa revision: la prossima arriva quando upstream
-# (o il nostro branch) avanza.
+#      di ziptv2, con l'immagine di produzione (`:ziptv2`) e con la candidata sulla
+#      stessa macchina; bocciato se cala la copertura (epg_coverage.py);
+#   5. promozione: push del tag di revision `:ziptv2-<upstream>-<nostro>`, l'alias
+#      `:ziptv2` passa alla candidata e `ziptv2` avanza al candidato.
+# Lo stack di Margie usa `:ziptv2`: il pull dell'immagine nuova lo fa il sistema di
+# aggiornamento delle immagini, non questo workflow. Per fermare una revision:
+# aggiungila alla variabile del repo EPG_HOLD_TAGS (tag separati da spazi).
 name: ziptv2 image
 
 on:
   workflow_dispatch:
-    inputs:
-      force:
-        description: Riproponi il candidato anche se la sua PR è già stata chiusa
-        type: boolean
-        default: false
   push:
     branches: [ziptv2]
   schedule:
@@ -41,12 +35,10 @@ permissions:
 env:
   IMAGE: ghcr.io/torvaldz/ziptv2-epg
   APP_REPO: ToRvaLDz/ziptv2
-  COMPOSE: infra/epg/docker-compose.yml
   CHANNELS: infra/epg/channels.xml
   COOLDOWN_DAYS: 7
   MAX_CHANNEL_LOSS: 0
   MAX_PROGRAMME_LOSS_PCT: 2
-  PR_BRANCH_PREFIX: epg-candidate/
 
 jobs:
   candidate:
@@ -56,7 +48,7 @@ jobs:
         env:
           ZIPTV2_TOKEN: ${{ secrets.ZIPTV2_TOKEN }}
         run: |
-          [ -n "$ZIPTV2_TOKEN" ] || { echo "::error::manca il secret ZIPTV2_TOKEN (PAT con Contents e Pull requests in scrittura su $APP_REPO)"; exit 1; }
+          [ -n "$ZIPTV2_TOKEN" ] || { echo "::error::manca il secret ZIPTV2_TOKEN (PAT con Contents in lettura su $APP_REPO, per i canali curati)"; exit 1; }
 
       - uses: actions/checkout@v7
         with:
@@ -91,27 +83,28 @@ jobs:
       - name: Immagine di produzione
         id: prod
         run: |
-          ref=$(grep -oE "${IMAGE}:[A-Za-z0-9._-]+" ".app/$COMPOSE" | head -1)
-          [ -n "$ref" ] || { echo "::error::immagine $IMAGE non trovata in $COMPOSE"; exit 1; }
+          # produzione = alias :ziptv2, lo stesso tag che usa lo stack su Margie
+          ref="$IMAGE:ziptv2"
           docker pull -q "$ref"
           labels=$(docker inspect --format '{{ json .Config.Labels }}' "$ref")
           label() { jq -r --arg k "$1" '(. // {})[$k] // empty' <<< "$labels"; }
+          upstream=$(label io.ziptv2.upstream)
+          base=$(label io.ziptv2.base)
           {
             echo "ref=$ref"
-            echo "tag=${ref##*:}"
+            echo "tag=ziptv2-${upstream:0:8}-${base:0:8}"
             echo "candidate=$(label io.ziptv2.candidate)"
-            echo "base=$(label io.ziptv2.base)"
+            echo "base=$base"
           } >> "$GITHUB_OUTPUT"
 
-      # La PR di un candidato è stata accettata (produzione = quel candidato): `ziptv2`
-      # diventa il candidato, così i prossimi rebase partono dalla versione approvata.
-      # Solo se il candidato è stato costruito dal `ziptv2` attuale: patch arrivate
-      # dopo non si perdono, entreranno nel prossimo candidato.
-      - name: Promozione
+      # `:ziptv2` è un candidato promosso ma `ziptv2` non è avanzato (push fallito nel
+      # run della promozione): avanza ora, così i prossimi rebase partono dalla
+      # versione in produzione. Solo se il candidato è stato costruito dal `ziptv2`
+      # attuale: patch arrivate dopo non si perdono, entreranno nel prossimo candidato.
+      - name: Recupero dell'avanzamento
         env:
           CANDIDATE: ${{ steps.prod.outputs.candidate }}
           BASE: ${{ steps.prod.outputs.base }}
-          PROD_REF: ${{ steps.prod.outputs.ref }}
         run: |
           head=$(git rev-parse HEAD)
           if [ -n "$CANDIDATE" ] && [ "$CANDIDATE" != "$head" ]; then
@@ -123,11 +116,6 @@ jobs:
             else
               echo "::notice::in produzione c'è ${CANDIDATE:0:8}, costruito da ${BASE:0:8}: ziptv2 ($head) ha commit nuovi, resta dov'è"
             fi
-          fi
-          digest() { docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}' 2>/dev/null || true; }
-          if [ "$(digest "$PROD_REF")" != "$(digest "$IMAGE:ziptv2")" ]; then
-            docker buildx imagetools create -t "$IMAGE:ziptv2" "$PROD_REF"
-            echo "::notice::alias :ziptv2 -> $PROD_REF"
           fi
 
       - name: Rebase sul riferimento upstream
@@ -164,23 +152,25 @@ jobs:
       - name: Candidato già valutato?
         id: seen
         env:
-          GH_TOKEN: ${{ secrets.ZIPTV2_TOKEN }}
           TAG: ${{ steps.rebase.outputs.tag }}
           CANDIDATE: ${{ steps.rebase.outputs.candidate }}
           PROD_CANDIDATE: ${{ steps.prod.outputs.candidate }}
           PROD_TAG: ${{ steps.prod.outputs.tag }}
-          FORCE: ${{ inputs.force }}
+          HOLD_TAGS: ${{ vars.EPG_HOLD_TAGS }}
         run: |
           if [ "$CANDIDATE" = "$PROD_CANDIDATE" ] || [ "$TAG" = "$PROD_TAG" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::$TAG è già in produzione, niente da proporre"
+            echo "::notice::$TAG è già in produzione, niente da promuovere"
             exit 0
           fi
-          pr=$(gh pr list -R "$APP_REPO" --head "$PR_BRANCH_PREFIX$TAG" --state all --json number,state --jq '.[0] | select(.) | "\(.number) \(.state)"')
-          if [ -n "$pr" ] && { [ "$FORCE" != "true" ] || [ "${pr#* }" = "OPEN" ]; }; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::$TAG ha già la PR $APP_REPO#${pr% *} (${pr#* })"
-          fi
+          # revision fermate a mano (variabile del repo EPG_HOLD_TAGS)
+          for held in $HOLD_TAGS; do
+            if [ "$held" = "$TAG" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::$TAG è in EPG_HOLD_TAGS, non viene promossa"
+              exit 0
+            fi
+          done
 
       - name: Push di ziptv2-next
         if: steps.seen.outputs.skip != 'true'
@@ -283,58 +273,34 @@ jobs:
         if: steps.seen.outputs.skip != 'true' && steps.published.outputs.yes != 'true'
         run: docker push -q "$IMAGE:${{ steps.rebase.outputs.tag }}"
 
-      - name: Aggiorna il tag in docker-compose
+      # Test passati: la candidata va in produzione. Prima l'alias (è quello che legge
+      # Margie), poi il branch: se il push del branch fallisce, il passo di recupero
+      # del run successivo lo fa avanzare.
+      - name: Promozione
         if: steps.seen.outputs.skip != 'true'
         env:
           PROD_REF: ${{ steps.prod.outputs.ref }}
+          PROD_TAG: ${{ steps.prod.outputs.tag }}
           TAG: ${{ steps.rebase.outputs.tag }}
           UPSTREAM: ${{ steps.rebase.outputs.upstream }}
           OURS: ${{ steps.rebase.outputs.ours }}
           CANDIDATE: ${{ steps.rebase.outputs.candidate }}
           SITES: ${{ steps.rebase.outputs.sites }}
         run: |
-          sed -i "s|$PROD_REF|$IMAGE:$TAG|" ".app/$COMPOSE"
-          grep -q "$IMAGE:$TAG" ".app/$COMPOSE"
-          # base upstream dell'ultima versione approvata (= `ziptv2` prima del rebase)
+          docker buildx imagetools create -t "$IMAGE:ziptv2" "$IMAGE:$TAG"
+          echo "::notice:::ziptv2 -> $TAG (prima: $PROD_TAG)"
+          if git push --force-with-lease="ziptv2:$OURS" origin "$CANDIDATE:refs/heads/ziptv2"; then
+            echo "::notice::ziptv2 avanzato a ${CANDIDATE:0:8}"
+          else
+            echo "::warning::ziptv2 è cambiato durante il run: avanzerà al prossimo run se non ha commit nuovi"
+          fi
+          # base upstream della versione sostituita (= `ziptv2` prima del rebase)
           prev=$(git merge-base "$OURS" "$UPSTREAM")
           {
-            echo "Candidato del fork EPG \`ToRvaLDz/epg\`: iptv-org/epg \`${UPSTREAM:0:8}\` + i nostri commit di \`ziptv2\` (\`${OURS:0:8}\`), branch \`ziptv2-next\` = \`${CANDIDATE:0:8}\`."
+            echo "## Promossa \`$TAG\`"
             echo
-            echo "- Immagine: \`$IMAGE:$TAG\` (oggi in produzione: \`$PROD_REF\`)"
+            echo "- \`$IMAGE:ziptv2\` ora punta a \`$TAG\` (prima: \`$PROD_TAG\`); Margie la prende al prossimo pull."
             if [ "$prev" != "$UPSTREAM" ]; then echo "- Novità upstream: https://github.com/iptv-org/epg/compare/${prev:0:12}...${UPSTREAM:0:12}"; fi
-            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (log e guide del grab nell'artifact \`grab-di-prova\`)"
             if [ -n "$SITES" ]; then echo "- Test jest dei siti patchati: passati (\`${SITES% }\`)"; fi
-            echo
-            cat "$RUNNER_TEMP/coverage.md"
-            echo
-            echo "Dopo il merge: redeploy manuale dello stack \`ziptv2-epg\` su Margie con pull. Al run notturno successivo \`ziptv2\` del fork avanza a questo candidato e \`:ziptv2\` lo segue."
-            echo "Per rifiutarlo: chiudi la PR, non verrà riproposta per questa revision."
-          } > "$RUNNER_TEMP/pr-body.md"
-
-      - name: PR in ziptv2
-        id: pr
-        if: steps.seen.outputs.skip != 'true'
-        uses: peter-evans/create-pull-request@v8
-        with:
-          token: ${{ secrets.ZIPTV2_TOKEN }}
-          path: .app
-          branch: ${{ env.PR_BRANCH_PREFIX }}${{ steps.rebase.outputs.tag }}
-          commit-message: 'chore: EPG backbone su ${{ steps.rebase.outputs.tag }}'
-          title: 'chore: EPG backbone su ${{ steps.rebase.outputs.tag }}'
-          body-path: ${{ runner.temp }}/pr-body.md
-          committer: ziptv2-bot <ziptv2-bot@users.noreply.github.com>
-          author: ziptv2-bot <ziptv2-bot@users.noreply.github.com>
-          delete-branch: true
-
-      # Una sola proposta aperta alla volta: le PR dei candidati precedenti si chiudono.
-      - name: Chiudi le PR superate
-        if: steps.pr.outputs.pull-request-number != ''
-        env:
-          GH_TOKEN: ${{ secrets.ZIPTV2_TOKEN }}
-          NEW: ${{ steps.pr.outputs.pull-request-number }}
-        run: |
-          gh pr list -R "$APP_REPO" --state open --json number,headRefName \
-            --jq ".[] | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\")) | select(.number != $NEW) | .number" |
-          while read -r n; do
-            gh pr close -R "$APP_REPO" "$n" --delete-branch --comment "Superata da #$NEW."
-          done
+            echo "- Per tornare indietro: \`docker buildx imagetools create -t $IMAGE:ziptv2 $IMAGE:$PROD_TAG\` e \`$TAG\` in EPG_HOLD_TAGS."
+          } >> "$GITHUB_STEP_SUMMARY"
